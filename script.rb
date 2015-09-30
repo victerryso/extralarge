@@ -152,6 +152,23 @@ end
 workbook = WriteXLSX.new('output.xlsx')
 worksheet = workbook.add_worksheet
 
+# Formating
+blues = [
+  workbook.set_custom_color(11, 227, 242, 253),
+  workbook.set_custom_color(12, 187, 222, 251),
+  workbook.set_custom_color(13, 144, 202, 249),
+  workbook.set_custom_color(14, 100, 181, 246),
+  workbook.set_custom_color(15, 66,  165, 245),
+  workbook.set_custom_color(16, 33,  150, 243),
+  workbook.set_custom_color(17, 30,  136, 229),
+  workbook.set_custom_color(18, 25,  118, 210),
+  workbook.set_custom_color(19, 21,  101, 192),
+  workbook.set_custom_color(20, 13,  71,  161)
+
+]
+
+formats = blues.map { |blue| workbook.add_format(:bg_color => blue, :pattern => 0, :border => 0) }
+
 # Insert Headers (Details)
 details = students.first[:details].keys
 details.each_with_index { |detail, index| worksheet.write(0, index, detail) }
@@ -179,7 +196,14 @@ end
 students.each_with_index do |student, index|
   row = index + 1
   student[:details].values.each_with_index { |detail, i| worksheet.write(row, i, detail) }
-  worksheet.write(row, 2, student[:excelFile])
+
+  matches = students.find { |s| !(s[:sheets].first[:cells] - student[:sheets].first[:cells]).any? && !s.eql?(student)}
+
+  if matches
+    worksheet.write(row, 2, student[:excelFile], formats[-1])
+  else
+    worksheet.write(row, 2, student[:excelFile])
+  end
 
   student[:charts].each_with_index do |chart, chart_index|
     col = details.length + chart_index * 5
@@ -196,7 +220,17 @@ students.each_with_index do |student, index|
     col += 1
     val = cell[:value]
 
-    worksheet.write(row, col, val)
+    matches = students.map { |s| s[:sheets].first[:cells].find { |c| c.eql?(cell) && !s.eql?(student) } }.compact.length
+
+    if matches >= formats.length
+      worksheet.write(row, col, val, formats[formats.length - 1])
+    elsif matches > 0
+      worksheet.write(row, col, val, formats[matches - 1])
+    else
+      worksheet.write(row, col, val)
+    end
+
+
   end
 end
 
