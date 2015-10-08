@@ -71,18 +71,13 @@ def open_zip_file(params)
         chart = {
           title:  doc.css('c|chart > c|title').text,
           xTitle: doc.css('c|catAx').text,
-          yTitle: doc.css('c|valAx').text,
-          xRef:   doc.css('c|xVal c|f').text,
-          yRef:   doc.css('c|yVal c|f').text
+          yTitle: doc.css('c|valAx').text
         }
 
         if chart[:xTitle] == ''
           chart[:xTitle] = doc.css('c|valAx')[0].text if doc.css('c|valAx')[0]
           chart[:yTitle] = doc.css('c|valAx')[1].text if doc.css('c|valAx')[1]
         end
-
-        if chart[:xRef] == '' then chart[:xRef] = doc.css('c|cat c|f').text end
-        if chart[:yRef] == '' then chart[:yRef] = doc.css('c|val c|f').text end
 
         params[:charts].push(chart)
 
@@ -137,6 +132,7 @@ def run_script(template_file, directory, output)
 
       # Get Correct Values From DataType
       sheet[:cells].each do |coordinate, cell|
+
         case cell[:datatype]
 
         when 's'
@@ -149,7 +145,6 @@ def run_script(template_file, directory, output)
 
         end
 
-        cell.delete(:datatype)
       end
 
     end
@@ -241,12 +236,12 @@ def run_script(template_file, directory, output)
   details = students.map { |student| student[:details].keys }.flatten.uniq
 
   charts = []
-  chart_keys = [:title, :xTitle, :yTitle, :xRef, :yRef]
+  chart_keys = [:title, :xTitle, :yTitle]
   no_charts = students.map { |student| student[:charts].length }.max
   no_charts.times { charts.push(chart_keys) }
 
   all_charts = []
-  all_charts = students.map { |student| (0..no_charts).map { |chart_index| student[:charts][chart_index] } }.flatten
+  all_charts = students.map { |student| (0..no_charts).map { |chart_index| student[:charts][chart_index] } }.uniq.flatten
 
   all_coordinates = students.map { |student| student[:sheets].first[:cells].keys }.flatten.uniq
 
@@ -306,6 +301,8 @@ def run_script(template_file, directory, output)
       match = coordinates[coordinate].index(cell)
       format = match ? formats[match] : nil
 
+      end
+
       val = cell[:value]
       match ? worksheet.write(row, col, val, format) : worksheet.write(row, col, val)
       col += 1
@@ -326,5 +323,5 @@ end
 #   run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
 # end
 
-n = 6
+n = 3
 run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
