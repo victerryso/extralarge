@@ -6,10 +6,12 @@ require 'byebug'
 require 'write_xlsx'
 
 def time_stamp(string)
-  puts "#{Time.new - $time} - #{string}"
+  time = Time.new - $time
+  time = time.round(2)
+  puts "#{time}s - #{string}"
 end
 
-time_stamp('Done Requiring')
+time_stamp('Required Modules')
 
 def open_zip_file(params)
 
@@ -130,10 +132,8 @@ def run_script(template_file, directory, output)
 
     # Validate Cells
     student[:sheets].map do |sheet|
-      p sheet[:cells].keys.length
       # Reject Coordinates which were in template
       template_coordinates.each { |coordinate| sheet[:cells].delete(coordinate) }
-      p sheet[:cells].keys.length
 
       # Get Correct Values From DataType
       sheet[:cells].each do |coordinate, cell|
@@ -157,7 +157,7 @@ def run_script(template_file, directory, output)
     student
   end
 
-  time_stamp('Done Grabbing Excel Files')
+  time_stamp('Parsed Excel Files')
 
   # Check to see percentage of copied sheet
   students.each do |s1|
@@ -169,7 +169,7 @@ def run_script(template_file, directory, output)
       s2_cells = s2[:sheets].first[:cells].clone
 
       coordinate_matches = s1_cells.select { |coordinate, cell| s2_cells[coordinate] }
-      cell_matches      = s1_cells.select { |coordinate, cell| cell == s2_cells[coordinate] }
+      cell_matches       = s1_cells.select { |coordinate, cell| cell == s2_cells[coordinate] }
 
       next if coordinate_matches.length == 0
 
@@ -180,15 +180,13 @@ def run_script(template_file, directory, output)
 
     matches = matches.compact.sort_by { |m| m[:percent] }.last
 
-    s1[:details][:percent] = matches[:percent] || 0
-    s1[:details][:copied] = matches[:copied] || s1[:details][:excelFile]
+    s1[:details][:percent] = matches && matches[:percent] || 0
+    s1[:details][:copied]  = matches && matches[:copied]  || s1[:details][:excelFile]
 
     external = s1[:details][:external] || []
     s1[:details].delete(:external)
     s1[:details][:external] = external.join(' || ')
   end
-
-  time_stamp('Done Percentage of Likeness')
 
   all_excel_files = []
 
@@ -208,7 +206,7 @@ def run_script(template_file, directory, output)
     [ percent, student[:details][:copied] ]
   end
 
-  time_stamp('Done Checking Similar Files')
+  time_stamp('Collected Similarities')
 
   # Create Workbook
   workbook = WriteXLSX.new(output)
@@ -239,126 +237,85 @@ def run_script(template_file, directory, output)
 
   formats = colors.map { |color| workbook.add_format(:bg_color => color, :pattern => 0, :border => 0) }
 
-  # Insert Headers (Details)
-  details = students.first[:details].keys
-  details.each_with_index { |detail, index| worksheet.write(0, index, detail) }
+  # Insert Headers and group chart/coordinate values
+  details = students.map { |student| student[:details].keys }.flatten.uniq
 
-  # Insert Headers (Charts)
-  headers = students.first[:charts].map { |chart| chart.keys }.flatten
-  headers.each_with_index { |header, index| worksheet.write(0, details.length + index, header) }
+  charts = []
+  chart_keys = [:title, :xTitle, :yTitle, :xRef, :yRef]
+  no_charts = students.map { |student| student[:charts].length }.max
+  no_charts.times { charts.push(chart_keys) }
 
-  byebug
+  all_charts = []
+  all_charts = students.map { |student| (0..no_charts).map { |chart_index| student[:charts][chart_index] } }.flatten
 
-  # Insert Headers (Coordinates)
   all_coordinates = students.map { |student| student[:sheets].first[:cells].keys }.flatten.uniq
-  all_coordinates -= template_coordinates
-  all_coordinates.sort_by! { |coordinate| [ coordinate.gsub(/\D/, '').to_i, coordinate.gsub(/\d/, '') ] }
 
-  all_coordinates.each_with_index do |coordinate, index|
-    row = 0
-    col = 2 * index + details.length + headers.length
-    val = "#{coordinate} (Formula)"
-
-    worksheet.write(row, col, val)
-
-    col += 1
-    val = "#{coordinate} (Value)"
-
-    worksheet.write(row, col, val)
+  coordinates = {}
+  all_coordinates.each do |coordinate|
+    values = students.map { |student| student[:sheets].first[:cells][coordinate] }.uniq.compact
+    coordinates[coordinate] = values
   end
 
+  all_coordinates = all_coordinates[0...5000] if all_coordinates.length > 5000
+
+  headers = {
+    details:     details,
+    charts:      charts.flatten,
+    coordinates: all_coordinates.map { |coordinate| [ "#{coordinate} (Formula)", "#{coordinate} (Value)" ] }.flatten.uniq
+  }
+
+  headers.values.flatten.each_with_index { |header, col| worksheet.write(0, col, header.to_s) }
+
   # Insert Rows
-  students.each_with_index do |student, index|
+  students.each_with_index do |student, row|
 
     # Insert Data (Details)
-    row = index + 1
-    student[:details].values.each_with_index { |detail, i| worksheet.write(row, i, detail) }
+    row += 1
+    student[:details].values.each_with_index { |detail, col| worksheet.write(row, col, detail) }
 
     # Insert Data (Charts)
-    # student[:charts].each_with_index do |chart, chart_index|
-    #   col = details.length + chart_index * 5
-    #   chart.values.each_with_index  |value, value_index| worksheet.write(row, col + value_index, value) }
-    # end
+    col = headers[:details].length
 
-    # student[:charts].each_with_index do |chart, chart_index|
-    #   chart.keys.each_with_index do |key, key_index|
-    #     matches = students.map { |s| s[:charts] }.flatten
-    #     matches = matches.select { |m| m[key].eql?(chart[key]) }.length
-    #     matches = matches > formats.length ? formats.length - 1 : matches
-    #
-    #     col = details.length + chart_index * 5 + key_index
-    #     val = chart[key]
-    #     # chart.values.each_with_index { |value, value_index| worksheet.write(row, col + value_index, value) }
-    #
-    #     if matches
-    #       worksheet.write(row, col, val, formats[matches])
-    #     else
-    #       worksheet.write(row, col, val)
-    #     end
-    #
-    #   end
-    # end
+    student[:charts].each do |chart|
+      match = all_charts.index(chart)
+      format = match ? formats[match / no_charts] : nil
 
-    student[:charts].each_with_index do |chart, chart_index|
-      chart.keys.each_with_index do |key, key_index|
-        # matches = students.map { |s| s[:charts] }.flatten.map { |m| m[key] }.uniq
-        # matches = matches.index(chart[key])
-
-        col = details.length + chart_index * 5 + key_index
+      chart.keys.each_with_index do |key|
         val = chart[key]
-
-        # if matches
-        #   worksheet.write(row, col, val, formats[matches])
-        # else
-          worksheet.write(row, col, val)
-        # end
-
+        match ? worksheet.write(row, col, val, format) : worksheet.write(row, col, val)
+        col += 1
       end
     end
 
-
     # Insert Data (Coordinates)
+    col = headers[:details].length + headers[:charts].length
     cells = student[:sheets].first[:cells]
-    cells.each do |cell|
-      # Insert Data (Formulas)
-      col = 2 * all_coordinates.find_index(cell[:coordinates]) + details.length + headers.length
+
+    all_coordinates.each do |coordinate|
+      cell = cells[coordinate]
+
+      unless cell
+        col += 2
+        next
+      end
+
       val = cell[:formula]
-
       worksheet.write(row, col, val)
-
-      # Insert Data (Values)
       col += 1
+
+      match = coordinates[coordinate].index(cell)
+      format = match ? formats[match] : nil
+
       val = cell[:value]
-
-      # Format Cells
-      # matches = students.map { |s| s[:sheets].first[:cells].find { |c| c.eql?(cell) && !s.eql?(student) } }.compact.length
-      #
-      # if matches >= formats.length
-      #   worksheet.write(row, col, val, formats[formats.length - 1])
-      # elsif matches > 0
-      #   worksheet.write(row, col, val, formats[matches - 1])
-      # else
-      #   worksheet.write(row, col, val)
-      # end
-
-      # Format Cells v2
-      # all_values = students.map { |s| s[:sheets].first[:cells].find { |c| c[:coordinates] == cell[:coordinates] } }
-      # all_values = all_values.compact.select { |v| all_values.select { |vv| v.eql?(vv) }.length > 1 }
-      # value_index = all_values.uniq.any? ? all_values.uniq.find_index(cell) : nil
-      #
-      # if value_index
-      #   worksheet.write(row, col, val, formats[value_index])
-      # else
-        worksheet.write(row, col, val)
-      # end
-
-
+      match ? worksheet.write(row, col, val, format) : worksheet.write(row, col, val)
+      col += 1
     end
+
   end
 
   workbook.close
 
-  time_stamp('Done Creating Workbook')
+  time_stamp('Workbook Created')
 
 end
 
@@ -369,5 +326,5 @@ end
 #   run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
 # end
 
-n = 3
+n = 6
 run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
