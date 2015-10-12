@@ -52,8 +52,8 @@ def open_zip_file(params)
         cells = {}
 
         doc.css('c').each do |cell|
-          formula = cell.css('f').text
-          value   = cell.css('v').text
+          formula = cell.css('f').text.downcase
+          value   = cell.css('v').text.downcase
           next if formula == '' && value == ''
 
           cells[cell['r']] = {
@@ -69,14 +69,14 @@ def open_zip_file(params)
 
       when :charts
         chart = {
-          title:  doc.css('c|chart > c|title').text,
-          xTitle: doc.css('c|catAx').text,
-          yTitle: doc.css('c|valAx').text
+          title:  doc.css('c|chart > c|title').text.downcase,
+          xTitle: doc.css('c|catAx').text.downcase,
+          yTitle: doc.css('c|valAx').text.downcase
         }
 
         if chart[:xTitle] == ''
-          chart[:xTitle] = doc.css('c|valAx')[0].text if doc.css('c|valAx')[0]
-          chart[:yTitle] = doc.css('c|valAx')[1].text if doc.css('c|valAx')[1]
+          chart[:xTitle] = doc.css('c|valAx')[0].text.downcase if doc.css('c|valAx')[0]
+          chart[:yTitle] = doc.css('c|valAx')[1].text.downcase if doc.css('c|valAx')[1]
         end
 
         params[:charts].push(chart)
@@ -112,10 +112,13 @@ def run_script(template_file, directory, output)
 
   # Initialize Student
   students = Dir.entries(directory)
-  students.select! { |student| /^[^~].*xlsx$/ === student}
-  students.map! { |student| directory + student }
 
-  students.map! do |student_file|
+  students.select! { |student| /^[^~].*xlsx$/ === student}
+
+  students.map! do |student|
+
+    student_file = directory + student
+
     student = {
       details: { excelFile: student_file },
       strings: [],
@@ -127,6 +130,7 @@ def run_script(template_file, directory, output)
 
     # Validate Cells
     student[:sheets].map do |sheet|
+
       # Reject Coordinates which were in template
       template_coordinates.each { |coordinate| sheet[:cells].delete(coordinate) }
 
@@ -175,8 +179,8 @@ def run_script(template_file, directory, output)
 
     matches = matches.compact.sort_by { |m| m[:percent] }.last
 
-    s1[:details][:percent] = matches && matches[:percent] || 0
-    s1[:details][:copied]  = matches && matches[:copied]  || s1[:details][:excelFile]
+    s1[:details][:percent] = matches ? matches[:percent] : 0
+    s1[:details][:copied]  = matches ? matches[:copied]  : s1[:details][:excelFile]
 
     external = s1[:details][:external] || []
     s1[:details].delete(:external)
@@ -185,9 +189,7 @@ def run_script(template_file, directory, output)
 
   all_excel_files = []
 
-  students.sort_by! do |student|
-    -student[:details][:percent]
-  end
+  students.sort_by! { |student| -student[:details][:percent] }
 
   students.each do |student|
     unless all_excel_files.include?(student[:details][:copied])
@@ -196,10 +198,7 @@ def run_script(template_file, directory, output)
     end
   end
 
-  students.sort_by! do |student|
-    percent = student[:details][:percent] ? -(student[:details][:percent]) : 0
-    [ percent, student[:details][:copied] ]
-  end
+  students.sort_by! { |student| [ -student[:details][:percent], student[:details][:copied] ] }
 
   time_stamp('Collected Similarities')
 
@@ -301,8 +300,6 @@ def run_script(template_file, directory, output)
       match = coordinates[coordinate].index(cell)
       format = match ? formats[match] : nil
 
-      end
-
       val = cell[:value]
       match ? worksheet.write(row, col, val, format) : worksheet.write(row, col, val)
       col += 1
@@ -318,10 +315,10 @@ end
 
 
 
-# 6.times do |n|
-#   n += 1
-#   run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
-# end
+6.times do |n|
+  n += 1
+  run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
+end
 
-n = 3
-run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
+# n = 3
+# run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
