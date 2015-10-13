@@ -4,6 +4,7 @@ require 'nokogiri'
 require 'zip'
 require 'byebug'
 require 'write_xlsx'
+require 'dentaku'
 
 def time_stamp(string)
   time = Time.new - $time
@@ -71,13 +72,18 @@ def open_zip_file(params)
         chart = {
           title:  doc.css('c|chart > c|title').text.downcase,
           xTitle: doc.css('c|catAx').text.downcase,
-          yTitle: doc.css('c|valAx').text.downcase
+          yTitle: doc.css('c|valAx').text.downcase,
+          xRef:   doc.css('c|xVal c|f').text,
+          yRef:   doc.css('c|yVal c|f').text
         }
 
         if chart[:xTitle] == ''
           chart[:xTitle] = doc.css('c|valAx')[0].text.downcase if doc.css('c|valAx')[0]
           chart[:yTitle] = doc.css('c|valAx')[1].text.downcase if doc.css('c|valAx')[1]
         end
+
+        if chart[:xRef] == '' then chart[:xRef] = doc.css('c|cat c|f').text end
+        if chart[:yRef] == '' then chart[:yRef] = doc.css('c|val c|f').text end
 
         params[:charts].push(chart)
 
@@ -132,7 +138,7 @@ def run_script(template_file, directory, output)
     student[:sheets].map do |sheet|
 
       # Reject Coordinates which were in template
-      template_coordinates.each { |coordinate| sheet[:cells].delete(coordinate) }
+      # template_coordinates.each { |coordinate| sheet[:cells].delete(coordinate) }
 
       # Get Correct Values From DataType
       sheet[:cells].each do |coordinate, cell|
@@ -157,6 +163,77 @@ def run_script(template_file, directory, output)
   end
 
   time_stamp('Parsed Excel Files')
+
+  # Marking
+  if template_file == 'templates/template3.xlsx'
+
+    # Evaluate Answers - Template 3
+    questions = [
+      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D18' },
+      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D19' },
+      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D20' },
+      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D21' },
+      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D22' },
+      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D23' },
+      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D24' },
+      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D25' },
+      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D26' },
+      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D27' },
+
+      { number: '2B', type: :condition, marks: 0.25, primary: 'L18 * 21 = M18',    secondary: 'M18'   },
+      { number: '2B', type: :condition, marks: 0.25, primary: 'L19 * 21 = M19',    secondary: 'M19'   },
+      { number: '2B', type: :condition, marks: 0.25, primary: 'L20 * 21 = M20',    secondary: 'M20'   },
+      { number: '2B', type: :condition, marks: 0.25, primary: 'L21 * 21 = M21',    secondary: 'M21'   },
+
+      { number: '2C', type: :regex,     marks: 1,    primary: /\$M\$18\:\$M\$21/i, secondary: :yRef   },
+
+      { number: '2D', type: :regex,     marks: 0.34, primary: /VO2/i,              secondary: :title  },
+      { number: '2D', type: :regex,     marks: 0.33, primary: /(heart rate|hr)/i,  secondary: :yTitle },
+      { number: '2D', type: :regex,     marks: 0.33, primary: /bpm/i,              secondary: :yTitle },
+
+      { number: '2E', type: :regex,     marks: 1,    primary: /\$F\$18\:\$G\$21/i, secondary: :xRef   },
+
+      { number: '7',  type: :equal,     marks: 1,    primary: 'B',                 secondary: 'B92'   }
+    ]
+
+    students.each do |student|
+      calculator = Dentaku::Calculator.new
+
+      student[:sheets].first[:cells].each do |coordinate, cell|
+        store = {}
+        store[coordinate] = cell[:value]
+        calculator.store(store)
+      end
+
+      student[:marks] = questions.map do |question|
+        correct = case question[:type]
+
+        when :condition
+          calculator.evaluate(question[:primary])
+
+        when :equal
+          cell = student[:sheets].first[:cells][question[:secondary]]
+          cell && question[:primary] == cell[:value]
+
+        when :regex
+          titles = student[:charts].map do |chart|
+            question[:primary] === chart[question[:secondary]]
+          end
+
+          titles.select! { |t| t }
+          titles.compact.any?
+
+        when :fill
+          student[:sheets].first[:cells][question[:primary]]
+
+        end
+        correct ? question[:marks] : 0
+      end
+
+      student[:marks] << student[:marks].inject(:+)
+
+    end
+  end
 
   # Check to see percentage of copied sheet
   students.each do |s1|
@@ -199,6 +276,12 @@ def run_script(template_file, directory, output)
   end
 
   students.sort_by! { |student| [ -student[:details][:percent], student[:details][:copied] ] }
+
+  students.sort_by! do |student|
+    sum1 = students.select { |s| s[:details][:copied] == student[:details][:copied] }.length
+    sum2 = students.select { |s| s[:details][:copied] == student[:details][:copied] }.map { |s| s[:details][:percent] }.inject(:+)
+    [ -sum1, -sum2, student[:details][:copied], -student[:details][:percent] ]
+  end
 
   time_stamp('Collected Similarities')
 
@@ -255,6 +338,7 @@ def run_script(template_file, directory, output)
   headers = {
     details:     details,
     charts:      charts.flatten,
+    marks:       template_file == 'templates/template3.xlsx' ? questions.map { |q| q[:number] } + ['Sum'] : [],
     coordinates: all_coordinates.map { |coordinate| [ "#{coordinate} (Formula)", "#{coordinate} (Value)" ] }.flatten.uniq
   }
 
@@ -281,8 +365,19 @@ def run_script(template_file, directory, output)
       end
     end
 
-    # Insert Data (Coordinates)
+    # Insert Data (Marks)
     col = headers[:details].length + headers[:charts].length
+
+    if student[:marks]
+      student[:marks].each do |mark|
+        worksheet.write(row, col, mark)
+        col += 1
+      end
+    end
+
+
+    # Insert Data (Coordinates)
+    col = headers[:details].length + headers[:marks].length + headers[:charts].length
     cells = student[:sheets].first[:cells]
 
     all_coordinates.each do |coordinate|
@@ -297,8 +392,16 @@ def run_script(template_file, directory, output)
       worksheet.write(row, col, val)
       col += 1
 
-      match = coordinates[coordinate].index(cell)
-      format = match ? formats[match] : nil
+      excel = student[:details][:copied]
+      copy  = students.find { |s| s[:details][:copied] == excel }
+      match = copy[:sheets].first[:cells][coordinate] == cell
+      list  = students.select { |s| s[:details][:copied] == excel }
+      if list.length > 1
+        index = students.map { |s| s[:details][:copied] }.uniq.index(excel)
+        index = index % formats.length
+        format = formats[index]
+      end
+
 
       val = cell[:value]
       match ? worksheet.write(row, col, val, format) : worksheet.write(row, col, val)
@@ -315,10 +418,11 @@ end
 
 
 
-6.times do |n|
-  n += 1
-  run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
-end
+# 6.times do |n|
+#   n += 1
+#   run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
+# end
 
-# n = 3
-# run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
+n = 3
+run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
+`open outputs/output3.xlsx`
