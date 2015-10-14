@@ -24,7 +24,7 @@ def open_zip_file(params)
     { name: :external, path: /xl\/external.*/           }
   ]
 
-  Zip::File.open(params[:details][:excelFile]) do |file|
+  Zip::File.open(params[:details][:filename]) do |file|
 
     # Handle entries one by one
     file.each do |entry|
@@ -106,7 +106,7 @@ end
 def run_script(template_file, directory, output)
 
   template = {
-    details: { excelFile: template_file },
+    details: { filename: template_file },
     strings: [],
     sheets:  [],
     charts:  []
@@ -126,7 +126,7 @@ def run_script(template_file, directory, output)
     student_file = directory + student
 
     student = {
-      details: { excelFile: student_file },
+      details: { filename: student_file },
       strings: [],
       sheets:  [],
       charts:  []
@@ -251,13 +251,13 @@ def run_script(template_file, directory, output)
 
       percent = cell_matches.length * 100 / coordinate_matches.length
 
-      { percent: percent, copied: s2[:details][:excelFile] }
+      { percent: percent, copied: s2[:details][:filename] }
     end
 
     matches = matches.compact.sort_by { |m| m[:percent] }.last
 
     s1[:details][:percent] = matches ? matches[:percent] : 0
-    s1[:details][:copied]  = matches ? matches[:copied]  : s1[:details][:excelFile]
+    s1[:details][:copied]  = matches ? matches[:copied]  : s1[:details][:filename]
 
     external = s1[:details][:external] || []
     s1[:details].delete(:external)
@@ -270,8 +270,8 @@ def run_script(template_file, directory, output)
 
   students.each do |student|
     unless all_excel_files.include?(student[:details][:copied])
-      student[:details][:copied] = student[:details][:excelFile]
-      all_excel_files << student[:details][:excelFile]
+      student[:details][:copied] = student[:details][:filename]
+      all_excel_files << student[:details][:filename]
     end
   end
 
@@ -285,134 +285,48 @@ def run_script(template_file, directory, output)
 
   time_stamp('Collected Similarities')
 
-  # Create Workbook
-  workbook = WriteXLSX.new(output)
-  worksheet = workbook.add_worksheet
+  # Flagging Students
+  students.each do |student|
+    flags = [
+      # { type: :external },
+      { type: :cell, coordinate: 'B83'}
 
-  # Formating
-  colors = [
-    workbook.set_custom_color(21, 229, 115, 115),
-    workbook.set_custom_color(22, 240, 98,  146),
-    workbook.set_custom_color(23, 186, 104, 200),
-    workbook.set_custom_color(24, 149, 117, 205),
-    workbook.set_custom_color(25, 121, 134, 203),
-    workbook.set_custom_color(26, 100, 181, 246),
-    workbook.set_custom_color(27, 79,  195, 247),
-    workbook.set_custom_color(28, 77,  208, 225),
-    workbook.set_custom_color(29, 77,  182, 172),
-    workbook.set_custom_color(30, 129, 199, 132),
-    workbook.set_custom_color(31, 174, 213, 129),
-    workbook.set_custom_color(32, 220, 231, 117),
-    workbook.set_custom_color(33, 255, 241, 118),
-    workbook.set_custom_color(34, 255, 213, 79 ),
-    workbook.set_custom_color(35, 255, 183, 77 ),
-    workbook.set_custom_color(36, 255, 138, 101),
-    workbook.set_custom_color(37, 161, 136, 127),
-    workbook.set_custom_color(38, 224, 224, 224),
-    workbook.set_custom_color(39, 144, 164, 174)
-  ]
+    ]
 
-  formats = colors.map { |color| workbook.add_format(:bg_color => color, :pattern => 0, :border => 0) }
+    flags.map do |flag|
+      color = case flag[:type]
 
-  # Insert Headers and group chart/coordinate values
-  details = students.map { |student| student[:details].keys }.flatten.uniq
+      when :external
+        student[:external]
 
-  charts = []
-  chart_keys = [:title, :xTitle, :yTitle]
-  no_charts = students.map { |student| student[:charts].length }.max
-  no_charts.times { charts.push(chart_keys) }
+      when :filename
+        students.find do |s|
+          s[:details][:filename] == student[:details][:filename] && !s.eql?(student)
+        end
 
-  all_charts = []
-  all_charts = students.map { |student| (0..no_charts).map { |chart_index| student[:charts][chart_index] } }.uniq.flatten
+      when :cell
+        cell = student[:sheets].first[:cells][flag[:coordinate]]
+        students.find do |s|
+          s_cell = s[:sheets].first[:cells][flag[:coordinate]]
 
-  all_coordinates = students.map { |student| student[:sheets].first[:cells].keys }.flatten.uniq
+          !cell.nil? && cell.eql?(s_cell) && !s.eql?(student)
+        end
 
-  coordinates = {}
-  all_coordinates.each do |coordinate|
-    values = students.map { |student| student[:sheets].first[:cells][coordinate] }.uniq.compact
-    coordinates[coordinate] = values
+      when :chart
+        chart = property
+        students.find do |s|
+          s[:charts].first[:title] == student[:charts].first[:title] && !s.eql?(student)
+        end
+
+      when :easter
+        false
+
+      end
+      p [ color[:sheets].first[:cells][flag[:coordinate]], student[:sheets].first[:cells][flag[:coordinate]] ] if color
+      # p color
+      p !!color
+    end
   end
-
-  all_coordinates = all_coordinates[0...5000] if all_coordinates.length > 5000
-
-  headers = {
-    details:     details,
-    charts:      charts.flatten,
-    marks:       template_file == 'templates/template3.xlsx' ? questions.map { |q| q[:number] } + ['Sum'] : [],
-    coordinates: all_coordinates.map { |coordinate| [ "#{coordinate} (Formula)", "#{coordinate} (Value)" ] }.flatten.uniq
-  }
-
-  headers.values.flatten.each_with_index { |header, col| worksheet.write(0, col, header.to_s) }
-
-  # Insert Rows
-  students.each_with_index do |student, row|
-
-    # Insert Data (Details)
-    row += 1
-    student[:details].values.each_with_index { |detail, col| worksheet.write(row, col, detail) }
-
-    # Insert Data (Charts)
-    col = headers[:details].length
-
-    student[:charts].each do |chart|
-      match = all_charts.index(chart)
-      format = match ? formats[match / no_charts] : nil
-
-      chart.keys.each_with_index do |key|
-        val = chart[key]
-        match ? worksheet.write(row, col, val, format) : worksheet.write(row, col, val)
-        col += 1
-      end
-    end
-
-    # Insert Data (Marks)
-    col = headers[:details].length + headers[:charts].length
-
-    if student[:marks]
-      student[:marks].each do |mark|
-        worksheet.write(row, col, mark)
-        col += 1
-      end
-    end
-
-
-    # Insert Data (Coordinates)
-    col = headers[:details].length + headers[:marks].length + headers[:charts].length
-    cells = student[:sheets].first[:cells]
-
-    all_coordinates.each do |coordinate|
-      cell = cells[coordinate]
-
-      unless cell
-        col += 2
-        next
-      end
-
-      val = cell[:formula]
-      worksheet.write(row, col, val)
-      col += 1
-
-      excel = student[:details][:copied]
-      copy  = students.find { |s| s[:details][:copied] == excel }
-      match = copy[:sheets].first[:cells][coordinate] == cell
-      list  = students.select { |s| s[:details][:copied] == excel }
-      if list.length > 1
-        index = students.map { |s| s[:details][:copied] }.uniq.index(excel)
-        index = index % formats.length
-        format = formats[index]
-      end
-
-
-      val = cell[:value]
-      match ? worksheet.write(row, col, val, format) : worksheet.write(row, col, val)
-      col += 1
-    end
-
-  end
-
-  workbook.close
-
-  time_stamp('Workbook Created')
 
 end
 
@@ -425,4 +339,3 @@ end
 
 n = 3
 run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
-`open outputs/output3.xlsx`
