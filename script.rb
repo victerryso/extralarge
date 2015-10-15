@@ -164,171 +164,94 @@ def run_script(template_file, directory, output)
 
   time_stamp('Parsed Excel Files')
 
-  # Marking
-  if template_file == 'templates/template3.xlsx'
-
-    # Evaluate Answers - Template 3
-    questions = [
-      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D18' },
-      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D19' },
-      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D20' },
-      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D21' },
-      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D22' },
-      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D23' },
-      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D24' },
-      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D25' },
-      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D26' },
-      { number: '2A', type: :fill,      marks: 0.1,  primary: 'D27' },
-
-      { number: '2B', type: :condition, marks: 0.25, primary: 'L18 * 21 = M18',    secondary: 'M18'   },
-      { number: '2B', type: :condition, marks: 0.25, primary: 'L19 * 21 = M19',    secondary: 'M19'   },
-      { number: '2B', type: :condition, marks: 0.25, primary: 'L20 * 21 = M20',    secondary: 'M20'   },
-      { number: '2B', type: :condition, marks: 0.25, primary: 'L21 * 21 = M21',    secondary: 'M21'   },
-
-      { number: '2C', type: :regex,     marks: 1,    primary: /\$M\$18\:\$M\$21/i, secondary: :yRef   },
-
-      { number: '2D', type: :regex,     marks: 0.34, primary: /VO2/i,              secondary: :title  },
-      { number: '2D', type: :regex,     marks: 0.33, primary: /(heart rate|hr)/i,  secondary: :yTitle },
-      { number: '2D', type: :regex,     marks: 0.33, primary: /bpm/i,              secondary: :yTitle },
-
-      { number: '2E', type: :regex,     marks: 1,    primary: /\$F\$18\:\$G\$21/i, secondary: :xRef   },
-
-      { number: '7',  type: :equal,     marks: 1,    primary: 'B',                 secondary: 'B92'   }
-    ]
-
-    students.each do |student|
-      calculator = Dentaku::Calculator.new
-
-      student[:sheets].first[:cells].each do |coordinate, cell|
-        store = {}
-        store[coordinate] = cell[:value]
-        calculator.store(store)
-      end
-
-      student[:marks] = questions.map do |question|
-        correct = case question[:type]
-
-        when :condition
-          calculator.evaluate(question[:primary])
-
-        when :equal
-          cell = student[:sheets].first[:cells][question[:secondary]]
-          cell && question[:primary] == cell[:value]
-
-        when :regex
-          titles = student[:charts].map do |chart|
-            question[:primary] === chart[question[:secondary]]
-          end
-
-          titles.select! { |t| t }
-          titles.compact.any?
-
-        when :fill
-          student[:sheets].first[:cells][question[:primary]]
-
-        end
-        correct ? question[:marks] : 0
-      end
-
-      student[:marks] << student[:marks].inject(:+)
-
-    end
-  end
-
-  # Check to see percentage of copied sheet
-  students.each do |s1|
-
-    matches = students.map do |s2|
-      next if s1.eql?(s2)
-
-      s1_cells = s1[:sheets].first[:cells].clone
-      s2_cells = s2[:sheets].first[:cells].clone
-
-      coordinate_matches = s1_cells.select { |coordinate, cell| s2_cells[coordinate] }
-      cell_matches       = s1_cells.select { |coordinate, cell| cell == s2_cells[coordinate] }
-
-      next if coordinate_matches.length == 0
-
-      percent = cell_matches.length * 100 / coordinate_matches.length
-
-      { percent: percent, copied: s2[:details][:filename] }
-    end
-
-    matches = matches.compact.sort_by { |m| m[:percent] }.last
-
-    s1[:details][:percent] = matches ? matches[:percent] : 0
-    s1[:details][:copied]  = matches ? matches[:copied]  : s1[:details][:filename]
-
-    external = s1[:details][:external] || []
-    s1[:details].delete(:external)
-    s1[:details][:external] = external.join(' || ')
-  end
-
-  all_excel_files = []
-
-  students.sort_by! { |student| -student[:details][:percent] }
-
-  students.each do |student|
-    unless all_excel_files.include?(student[:details][:copied])
-      student[:details][:copied] = student[:details][:filename]
-      all_excel_files << student[:details][:filename]
-    end
-  end
-
-  students.sort_by! { |student| [ -student[:details][:percent], student[:details][:copied] ] }
-
-  students.sort_by! do |student|
-    sum1 = students.select { |s| s[:details][:copied] == student[:details][:copied] }.length
-    sum2 = students.select { |s| s[:details][:copied] == student[:details][:copied] }.map { |s| s[:details][:percent] }.inject(:+)
-    [ -sum1, -sum2, student[:details][:copied], -student[:details][:percent] ]
-  end
-
-  time_stamp('Collected Similarities')
-
   # Flagging Students
   students.each do |student|
-    flags = [
-      # { type: :external },
-      { type: :cell, coordinate: 'B83'}
 
+    # Test Flags
+    flags = [
+      { type: :external, color: :red    },
+      { type: :filename, color: :red    },
+      { type: :author,   color: :orange },
+      { type: :cell,     color: :red,    coordinate: 'B83' },
+      { type: :chart,    color: :orange, property: :title  }
     ]
 
-    flags.map do |flag|
-      color = case flag[:type]
+    # Show Colors
+    matches = flags.map do |flag|
+      match = case flag[:type]
 
       when :external
-        student[:external]
+        student[:details][:external]
 
       when :filename
-        students.find do |s|
-          s[:details][:filename] == student[:details][:filename] && !s.eql?(student)
-        end
+        filename = student[:details][:filename]
+        students.reject { |s| s.eql?(student) }.count { |s| filename == s[:details][:filename] } > 0
+
+      when :author
+        name = student[:details][:name]
+        students.reject { |s| s.eql?(student) }.count { |s| name == s[:details][:name] } > 0
 
       when :cell
         cell = student[:sheets].first[:cells][flag[:coordinate]]
-        students.find do |s|
-          s_cell = s[:sheets].first[:cells][flag[:coordinate]]
-
-          !cell.nil? && cell.eql?(s_cell) && !s.eql?(student)
-        end
+        students.reject { |s| s.eql?(student) }.count { |s| cell.eql?(s[:sheets].first[:cells][flag[:coordinate]]) } > 0
 
       when :chart
-        chart = property
-        students.find do |s|
-          s[:charts].first[:title] == student[:charts].first[:title] && !s.eql?(student)
-        end
+        chart = student[:charts].first
+        property = chart ? chart[flag[:property]] : nil
+        students.reject { |s| s.eql?(student) }.map { |s| s[:charts] }.flatten.count { |c| c[flag[:property]] == property } > 0
 
-      when :easter
-        false
+      # TODO - Insert Text Somewhere and Find it Here
+      # when :easter
 
       end
-      p [ color[:sheets].first[:cells][flag[:coordinate]], student[:sheets].first[:cells][flag[:coordinate]] ] if color
-      # p color
-      p !!color
+
+      match ? flag[:color] : :green
     end
+
+    p matches
+  end
+
+  # Marking
+  return
+  students.each do |student|
+    calculator = Dentaku::Calculator.new
+
+    student[:sheets].first[:cells].each do |coordinate, cell|
+      store = {}
+      store[coordinate] = cell[:value]
+      calculator.store(store)
+    end
+
+    student[:marks] = questions.map do |question|
+      correct = case question[:type]
+
+      when :condition
+        calculator.evaluate(question[:primary])
+
+      when :equal
+        cell = student[:sheets].first[:cells][question[:secondary]]
+        cell && question[:primary] == cell[:value]
+
+      when :regex
+        titles = student[:charts].map { |chart| question[:primary] === chart[question[:secondary]] }
+
+        titles.select! { |t| t }
+        titles.compact.any?
+
+      when :fill
+        student[:sheets].first[:cells][question[:primary]]
+
+      end
+      correct ? question[:marks] : 0
+    end
+
+    student[:marks] << student[:marks].inject(:+)
+
   end
 
 end
+
+
 
 
 
@@ -336,6 +259,36 @@ end
 #   n += 1
 #   run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
 # end
+
+questions = [
+  { number: '2A', type: :fill,      marks: 0.1,  primary: 'D18' },
+  { number: '2A', type: :fill,      marks: 0.1,  primary: 'D19' },
+  { number: '2A', type: :fill,      marks: 0.1,  primary: 'D20' },
+  { number: '2A', type: :fill,      marks: 0.1,  primary: 'D21' },
+  { number: '2A', type: :fill,      marks: 0.1,  primary: 'D22' },
+  { number: '2A', type: :fill,      marks: 0.1,  primary: 'D23' },
+  { number: '2A', type: :fill,      marks: 0.1,  primary: 'D24' },
+  { number: '2A', type: :fill,      marks: 0.1,  primary: 'D25' },
+  { number: '2A', type: :fill,      marks: 0.1,  primary: 'D26' },
+  { number: '2A', type: :fill,      marks: 0.1,  primary: 'D27' },
+
+  { number: '2B', type: :condition, marks: 0.25, primary: 'L18 * 21 = M18',    secondary: 'M18'   },
+  { number: '2B', type: :condition, marks: 0.25, primary: 'L19 * 21 = M19',    secondary: 'M19'   },
+  { number: '2B', type: :condition, marks: 0.25, primary: 'L20 * 21 = M20',    secondary: 'M20'   },
+  { number: '2B', type: :condition, marks: 0.25, primary: 'L21 * 21 = M21',    secondary: 'M21'   },
+
+  { number: '2C', type: :regex,     marks: 1,    primary: /\$M\$18\:\$M\$21/i, secondary: :yRef   },
+
+  { number: '2D', type: :regex,     marks: 0.34, primary: /VO2/i,              secondary: :title  },
+  { number: '2D', type: :regex,     marks: 0.33, primary: /(heart rate|hr)/i,  secondary: :yTitle },
+  { number: '2D', type: :regex,     marks: 0.33, primary: /bpm/i,              secondary: :yTitle },
+
+  { number: '2E', type: :regex,     marks: 1,    primary: /\$F\$18\:\$G\$21/i, secondary: :xRef   },
+
+  { number: '7',  type: :equal,     marks: 1,    primary: 'B',                 secondary: 'B92'   }
+]
+
+
 
 n = 3
 run_script("templates/template#{n}.xlsx", "worksheets/worksheets#{n}/", "outputs/output#{n}.xlsx")
